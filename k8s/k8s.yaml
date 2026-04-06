@@ -1,0 +1,52 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: storage-service
+spec:
+  clusterIP: None # Headless service for P2P DNS
+  selector:
+    app: storagevault
+  ports:
+    - port: 3000
+      name: p2p
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: vault
+spec:
+  serviceName: "storage-service"
+  replicas: 3
+  selector:
+    matchLabels:
+      app: storagevault
+  template:
+    metadata:
+      labels:
+        app: storagevault
+    spec:
+      containers:
+        - name: storagevault
+          image: your-docker-username/storagevault:v1
+          env:
+            - name: LISTEN_ADDR
+              value: ":3000"
+            - name: BOOTSTRAP_NODES
+              # This uses the stable DNS names provided by the StatefulSet
+              value: "vault-0.storage-service:3000,vault-1.storage-service:3000"
+          resources:
+            limits:
+              memory: "256Mi" # This is your O(1) RAM proof!
+              cpu: "500m"
+          volumeMounts:
+            - name: data
+              mountPath: /root/network_storage
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi

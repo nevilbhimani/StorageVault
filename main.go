@@ -2,10 +2,9 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"os"
-	"time"
+	"strings"
 
 	"github.com/anthdm/foreverstore/p2p"
 )
@@ -34,54 +33,31 @@ func makeServer(listenAddr string, nodes ...string) *FileServer {
 }
 
 func main() {
-	s1 := makeServer(":3000", "")
-	s2 := makeServer(":8000", "")
-	s3 := makeServer(":9000", ":3000", ":8000")
-
-	go func() { log.Fatal(s1.Start()) }()
-	time.Sleep(500 * time.Millisecond)
-	go func() { log.Fatal(s2.Start()) }()
-
-	time.Sleep(2 * time.Second)
-
-	go s3.Start()
-	time.Sleep(2 * time.Second)
-	
-	fileName := "test_big_file.dat"
-    f, err := os.Open(fileName)
-    if err != nil {
-        log.Fatal(err)
-    }
-    defer f.Close()
-
-    fmt.Println("--- PHASE 1: STORING 1GB FILE ---")
-    // Note: Since your Store now handles the disk write, 
-    // we pass the file reader directly.
-    if err := s3.Store("huge_file_001", f); err != nil {
-        log.Fatal(err)
-    }
-    fmt.Println("Done storing and broadcasting.")
-
-    fmt.Println("--- PHASE 2: LOCAL DELETE ---")
-    s3.store.Delete(s3.ID, "huge_file_001")
-
-    fmt.Println("--- PHASE 3: NETWORK FETCH (The Stress Test) ---")
-    startTime := time.Now()
-    
-    r, err := s3.Get("huge_file_001")
-    if err != nil {
-        log.Fatal(err)
+	 // 1. Get the address to listen on. 
+    // In GKE, we usually listen on all interfaces (":3000")
+    listenAddr := os.Getenv("LISTEN_ADDR")
+    if listenAddr == "" {
+        listenAddr = ":3000"
     }
 
-    // Use io.Copy to io.Discard to simulate reading the whole file 
-    // without using any memory or printing to console.
-    n, err := io.Copy(io.Discard, r)
-    if err != nil {
-        log.Fatal(err)
+    // 2. Get the list of peers to connect to.
+    // Example: "vault-0.storage-service:3000,vault-1.storage-service:3000"
+    bootstrapNodesStr := os.Getenv("BOOTSTRAP_NODES")
+    var bootstrapNodes []string
+    if bootstrapNodesStr != "" {
+        bootstrapNodes = strings.Split(bootstrapNodesStr, ",")
     }
 
-    duration := time.Since(startTime)
-    fmt.Printf("SUCCESS! Fetched %d bytes in %v\n", n, duration)
+    // 3. Initialize the server using your existing makeServer function
+    s := makeServer(listenAddr, bootstrapNodes...)
+
+    fmt.Printf("Starting StorageVault node on %s\n", listenAddr)
+    if len(bootstrapNodes) > 0 {
+        fmt.Printf("Attempting to peer with: %v\n", bootstrapNodes)
+    }
+
+    // 4. Start the blocking server
+    log.Fatal(s.Start())
 
  
 }
