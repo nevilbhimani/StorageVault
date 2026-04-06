@@ -1,0 +1,14 @@
+cat <<EOF > .gitignore
+# Binaries
+foreverstore
+*.exe
+
+# Large Test Data
+*.dat
+*_network/
+
+# OS/IDE junk
+.DS_Store
+.vscode/
+.idea/
+EOF
