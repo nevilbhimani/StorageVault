@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bytes"
+	"crypto/rand"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/anthdm/foreverstore/p2p"
 )
@@ -26,38 +30,65 @@ func makeServer(listenAddr string, nodes ...string) *FileServer {
 	}
 
 	s := NewFileServer(fileServerOpts)
-
 	tcpTransport.OnPeer = s.OnPeer
-
 	return s
 }
 
 func main() {
-	 // 1. Get the address to listen on. 
-    // In GKE, we usually listen on all interfaces (":3000")
-    listenAddr := os.Getenv("LISTEN_ADDR")
-    if listenAddr == "" {
-        listenAddr = ":3000"
-    }
+	// If env vars are set, run in GKE/production mode (single node)
+	listenAddr := os.Getenv("LISTEN_ADDR")
+	if listenAddr != "" {
+		bootstrapNodesStr := os.Getenv("BOOTSTRAP_NODES")
+		var bootstrapNodes []string
+		if bootstrapNodesStr != "" {
+			bootstrapNodes = strings.Split(bootstrapNodesStr, ",")
+		}
+		s := makeServer(listenAddr, bootstrapNodes...)
+		fmt.Printf("Starting StorageVault node on %s\n", listenAddr)
+		log.Fatal(s.Start())
+		return
+	}
 
-    // 2. Get the list of peers to connect to.
-    // Example: "vault-0.storage-service:3000,vault-1.storage-service:3000"
-    bootstrapNodesStr := os.Getenv("BOOTSTRAP_NODES")
-    var bootstrapNodes []string
-    if bootstrapNodesStr != "" {
-        bootstrapNodes = strings.Split(bootstrapNodesStr, ",")
-    }
+	// Local demo mode: spin up 3 nodes, connect them, store and retrieve a file
+	s1 := makeServer(":6000")
+	s2 := makeServer(":6001")
+	s3 := makeServer(":6002", ":6000", ":6001")
 
-    // 3. Initialize the server using your existing makeServer function
-    s := makeServer(listenAddr, bootstrapNodes...)
+	go func() { log.Fatal(s1.Start()) }()
+	go func() { log.Fatal(s2.Start()) }()
 
-    fmt.Printf("Starting StorageVault node on %s\n", listenAddr)
-    if len(bootstrapNodes) > 0 {
-        fmt.Printf("Attempting to peer with: %v\n", bootstrapNodes)
-    }
+	time.Sleep(500 * time.Millisecond)
 
-    // 4. Start the blocking server
-    log.Fatal(s.Start())
+	go func() { log.Fatal(s3.Start()) }()
 
- 
+	time.Sleep(500 * time.Millisecond)
+
+	// Store a file from s3 — it writes locally and streams to s1 and s2
+	key := "myprivatepicture.jpg"
+	data := io.LimitReader(rand.Reader, 1<<30)
+	 
+	fmt.Println("=> Storing file from s3...")
+	if err := s3.Store(key, data); err != nil {
+		log.Fatal(err)
+	}
+
+	time.Sleep(500 * time.Millisecond)
+
+	// Delete from s3 local disk to prove it fetches from the network
+	if err := s3.store.Delete(s3.ID, key); err != nil {
+		log.Fatal(err)
+	}
+
+	// Fetch the file — s3 doesn't have it locally, fetches from s1 or s2
+	fmt.Println("=> Fetching file from network (s3 deleted its local copy)...")
+	r, err := s3.Get(key)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	buf := new(bytes.Buffer)
+	buf.ReadFrom(r)
+	fmt.Printf("=> Retrieved successfully: %d bytes\n", buf.Len())
+
+	select {}
 }

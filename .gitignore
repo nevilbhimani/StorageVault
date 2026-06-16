@@ -7,6 +7,10 @@ foreverstore
 *.dat
 *_network/
 
+*_network/
+*.dat
+bin/
+
 # OS/IDE junk
 .DS_Store
 .vscode/

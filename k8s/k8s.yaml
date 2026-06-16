@@ -28,7 +28,8 @@ spec:
     spec:
       containers:
         - name: storagevault
-          image: your-docker-username/storagevault:v1
+          image: storagevault:v1
+          imagePullPolicy: Never
           env:
             - name: LISTEN_ADDR
               value: ":3000"

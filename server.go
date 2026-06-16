@@ -101,7 +101,7 @@ func (s *FileServer) Get(key string) (io.Reader, error) {
 		return nil, err
 	}
 
-	time.Sleep(time.Millisecond * 500)
+	time.Sleep(time.Second * 2)
 
 	for _, peer := range s.peers {
 		// First read the file size so we can limit the amount of bytes that we read
@@ -122,19 +122,14 @@ func (s *FileServer) Get(key string) (io.Reader, error) {
 	_, r, err := s.store.Read(s.ID, key)
 	return r, err
 }
-
 func (s *FileServer) Store(key string, r io.Reader) error {
-	// var (
-	// 	fileBuffer = new(bytes.Buffer)
-	// 	tee        = io.TeeReader(r, fileBuffer)
-	// )
-	// //this way is very inefficient, change this later
-	// size, err := s.store.Write(s.ID, key, tee)
+	// Step 1: write to local disk first (streaming, O(1) memory via 32KB chunks)
 	size, err := s.store.Write(s.ID, key, r)
 	if err != nil {
 		return err
 	}
 
+	// Step 2: tell peers a file is coming
 	msg := Message{
 		Payload: MessageStoreFile{
 			ID:   s.ID,
@@ -142,37 +137,40 @@ func (s *FileServer) Store(key string, r io.Reader) error {
 			Size: size + 16,
 		},
 	}
-
 	if err := s.broadcast(&msg); err != nil {
 		return err
 	}
 
+	// Give peers time to register the message and enter stream-read mode
 	time.Sleep(time.Millisecond * 5)
 
-	 
-	 _, fileReader, err := s.store.Read(s.ID, key)
-	if err != nil {
-		return err
-	}
+	// Step 3: re-read from disk and stream to peers via io.Pipe
+	// io.Pipe gives us backpressure: the goroutine blocks until peers consume each chunk
+	pr, pw := io.Pipe()
+
+	go func() {
+		_, fileReader, err := s.store.Read(s.ID, key)
+		if err != nil {
+			pw.CloseWithError(err)
+			return
+		}
+		_, err = copyEncrypt(s.EncKey, fileReader, pw)
+		pw.CloseWithError(err)
+	}()
 
 	peers := []io.Writer{}
 	for _, peer := range s.peers {
 		peers = append(peers, peer)
 	}
-
 	mw := io.MultiWriter(peers...)
-
-	// send stream signal
 	mw.Write([]byte{p2p.IncomingStream})
 
-	// stream file directly from disk
-	n, err := copyEncrypt(s.EncKey, fileReader, mw)
+	n, err := io.Copy(mw, pr)
 	if err != nil {
 		return err
 	}
 
-	fmt.Printf("[%s] received and written (%d) bytes to disk\n", s.Transport.Addr(), n)
-
+	fmt.Printf("[%s] stored and streamed (%d) bytes to %d peers\n", s.Transport.Addr(), n, len(s.peers))
 	return nil
 }
 
@@ -273,9 +271,8 @@ func (s *FileServer) handleMessageStoreFile(from string, msg MessageStoreFile) e
 	}
 
 	fmt.Printf("[%s] written %d bytes to disk\n", s.Transport.Addr(), n)
-
+	fmt.Printf("[%s] closing stream from %s\n", s.Transport.Addr(), from) // ADD THIS
 	peer.CloseStream()
-
 	return nil
 }
 

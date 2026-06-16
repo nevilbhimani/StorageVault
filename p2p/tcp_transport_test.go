@@ -18,6 +18,7 @@ func TestTCPTransport(t *testing.T) {
 	assert.Equal(t, tr.ListenAddr, ":3000")
 
 	assert.Nil(t, tr.ListenAndAccept())
+	t.Cleanup(func() { tr.Close() })
 }
 
 func TestTCPTransport_Dial(t *testing.T) {
@@ -28,6 +29,7 @@ func TestTCPTransport_Dial(t *testing.T) {
 	}
 	tr := NewTCPTransport(opts)
 	assert.Nil(t, tr.ListenAndAccept())
+	t.Cleanup(func() { tr.Close() })
 
 	assert.Nil(t, tr.Dial(":3000"))
 }
@@ -40,6 +42,7 @@ func TestTCPTransport_Close(t *testing.T)	{
 	}
 	tr := NewTCPTransport(opts)
 	assert.Nil(t, tr.ListenAndAccept())
+	t.Cleanup(func() { tr.Close() })
 
 	assert.Nil(t, tr.Close())
 }
@@ -52,6 +55,7 @@ func TestTCPTransport_Consume(t *testing.T) {
 	}
 	tr := NewTCPTransport(opts)
 	assert.Nil(t, tr.ListenAndAccept())
+	t.Cleanup(func() { tr.Close() })
 
 	ch := tr.Consume()
 	assert.NotNil(t, ch)
@@ -65,6 +69,7 @@ func Test_TCPTransport_handleConn(t *testing.T){
 	}
 	tr := NewTCPTransport(opts)
 	assert.Nil(t, tr.ListenAndAccept())
+	t.Cleanup(func() { tr.Close() })
 
 	conn, err := net.Dial("tcp", ":3000")
 	assert.Nil(t, err)
